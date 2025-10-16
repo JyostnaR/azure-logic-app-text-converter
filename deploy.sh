@@ -8,7 +8,7 @@ set -e
 
 # Configuration - can be overridden by environment variables
 RESOURCE_GROUP_NAME="${RESOURCE_GROUP_NAME:-rg-text-to-json-converter}"
-LOCATION="${LOCATION:-East US}"
+LOCATION="${LOCATION:-eastus}"
 TEMPLATE_FILE="template.json"
 PARAMETERS_FILE="parameters.json"
 DEPLOYMENT_NAME="text-to-json-deployment-$(date +%Y%m%d-%H%M%S)"
