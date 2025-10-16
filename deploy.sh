@@ -73,13 +73,11 @@ fi
 # Deploy the Logic App
 echo -e "\n${YELLOW}Deploying Logic App...${NC}"
 deployment_result=$(az deployment group create \
-    --resource-group $RESOURCE_GROUP_NAME \
-    --template-file $TEMPLATE_FILE \
-    --parameters @$PARAMETERS_FILE \
-    --parameters logicAppName=$LOGIC_APP_NAME \
-    --parameters location="$LOCATION" \
-    --parameters environment=$ENVIRONMENT \
-    --name $DEPLOYMENT_NAME \
+    --resource-group "$RESOURCE_GROUP_NAME" \
+    --template-file "$TEMPLATE_FILE" \
+    --parameters @"$PARAMETERS_FILE" \
+    --parameters logicAppName="$LOGIC_APP_NAME" location="$LOCATION" environment="$ENVIRONMENT" \
+    --name "$DEPLOYMENT_NAME" \
     --output json)
 
 # Extract Logic App resource ID from deployment result
