@@ -19,7 +19,7 @@ on:
       location:
         description: 'Azure region'
         required: true
-        default: 'East US'
+        default: 'eastus'
         type: string
 
 env:
@@ -44,7 +44,7 @@ jobs:
       id: set-vars
       run: |
         ENVIRONMENT="${{ github.event.inputs.environment || 'dev' }}"
-        LOCATION="${{ github.event.inputs.location || 'East US' }}"
+        LOCATION="${{ github.event.inputs.location || 'eastus' }}"
         DEPLOYMENT_NAME="github-deployment-$(date +%Y%m%d-%H%M%S)"
         
         echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
