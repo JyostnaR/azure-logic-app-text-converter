@@ -1,0 +1,73 @@
+name: Cleanup Old Deployments
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Cleanup Old Resource Groups
+      run: |
+        # List resource groups that match our pattern and are older than 30 days
+        EXPIRY_DATE=$(date -d '30 days ago' --iso-8601)
+        
+        echo "Cleaning up resource groups older than $EXPIRY_DATE"
+        
+        # Get resource groups matching our pattern
+        RESOURCE_GROUPS=$(az group list --query "[?contains(name, 'rg-text-to-json-converter') && contains(name, 'dev')].{Name:name, Created:tags.created}" --output table)
+        
+        if [ -n "$RESOURCE_GROUPS" ]; then
+          echo "Found resource groups to clean up:"
+          echo "$RESOURCE_GROUPS"
+          
+          # Delete old dev resource groups (be careful with this)
+          az group list --query "[?contains(name, 'rg-text-to-json-converter') && contains(name, 'dev')].name" --output tsv | while read rg; do
+            if [ -n "$rg" ]; then
+              echo "Deleting resource group: $rg"
+              # Uncomment the next line to actually delete (currently commented for safety)
+              # az group delete --name "$rg" --yes --no-wait
+              echo "Would delete: $rg (uncomment to enable actual deletion)"
+            fi
+          done
+        else
+          echo "No resource groups found for cleanup"
+        fi
+
+    - name: Cleanup Old Artifacts
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            run_id: context.runId,
+          });
+          
+          const oldArtifacts = artifacts.data.artifacts.filter(artifact => {
+            const createdAt = new Date(artifact.created_at);
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            return createdAt < thirtyDaysAgo;
+          });
+          
+          console.log(`Found ${oldArtifacts.length} artifacts older than 30 days`);
+          
+          for (const artifact of oldArtifacts) {
+            console.log(`Would delete artifact: ${artifact.name}`);
+            // Uncomment to actually delete artifacts
+            // await github.rest.actions.deleteArtifact({
+            //   owner: context.repo.owner,
+            //   repo: context.repo.repo,
+            //   artifact_id: artifact.id,
+            // });
+          }

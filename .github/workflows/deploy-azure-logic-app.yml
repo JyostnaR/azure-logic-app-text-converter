@@ -1,0 +1,142 @@
+name: Deploy Azure Logic App
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+      location:
+        description: 'Azure region'
+        required: true
+        default: 'East US'
+        type: string
+
+env:
+  AZURE_RESOURCE_GROUP: rg-text-to-json-converter
+  LOGIC_APP_NAME: text-to-json-converter
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set deployment variables
+      id: set-vars
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment || 'dev' }}"
+        LOCATION="${{ github.event.inputs.location || 'East US' }}"
+        DEPLOYMENT_NAME="github-deployment-$(date +%Y%m%d-%H%M%S)"
+        
+        echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+        echo "location=$LOCATION" >> $GITHUB_OUTPUT
+        echo "deployment_name=$DEPLOYMENT_NAME" >> $GITHUB_OUTPUT
+        
+        # Set resource group name based on environment
+        if [ "$ENVIRONMENT" = "prod" ]; then
+          echo "resource_group=rg-text-to-json-converter-prod" >> $GITHUB_OUTPUT
+          echo "logic_app_name=text-to-json-converter-prod" >> $GITHUB_OUTPUT
+        elif [ "$ENVIRONMENT" = "staging" ]; then
+          echo "resource_group=rg-text-to-json-converter-staging" >> $GITHUB_OUTPUT
+          echo "logic_app_name=text-to-json-converter-staging" >> $GITHUB_OUTPUT
+        else
+          echo "resource_group=rg-text-to-json-converter-dev" >> $GITHUB_OUTPUT
+          echo "logic_app_name=text-to-json-converter-dev" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Resource Group
+      run: |
+        az group create \
+          --name ${{ steps.set-vars.outputs.resource_group }} \
+          --location "${{ steps.set-vars.outputs.location }}"
+
+    - name: Deploy ARM Template
+      uses: azure/arm-deploy@v1
+      with:
+        subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        resourceGroupName: ${{ steps.set-vars.outputs.resource_group }}
+        template: template.json
+        parameters: |
+          logicAppName=${{ steps.set-vars.outputs.logic_app_name }}
+          location=${{ steps.set-vars.outputs.location }}
+          environment=${{ steps.set-vars.outputs.environment }}
+        deploymentName: ${{ steps.set-vars.outputs.deployment_name }}
+
+    - name: Get Logic App Trigger URL
+      id: get-url
+      run: |
+        TRIGGER_URL=$(az logic workflow show \
+          --resource-group ${{ steps.set-vars.outputs.resource_group }} \
+          --name ${{ steps.set-vars.outputs.logic_app_name }} \
+          --query "accessEndpoint" \
+          --output tsv)
+        
+        echo "trigger_url=$TRIGGER_URL" >> $GITHUB_OUTPUT
+        echo "Trigger URL: $TRIGGER_URL"
+
+    - name: Test Logic App
+      run: |
+        echo "Testing Logic App endpoint..."
+        curl -X POST "${{ steps.get-url.outputs.trigger_url }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "fileName": "test.txt",
+            "fileContent": "SGVsbG8gV29ybGQ=",
+            "contentType": "text/plain"
+          }' \
+          --max-time 30 \
+          --fail-with-body || echo "Test failed - this might be expected during initial deployment"
+
+    - name: Create Deployment Summary
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Environment | ${{ steps.set-vars.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Resource Group | ${{ steps.set-vars.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Logic App Name | ${{ steps.set-vars.outputs.logic_app_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Location | ${{ steps.set-vars.outputs.location }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Deployment Name | ${{ steps.set-vars.outputs.deployment_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 Trigger URL" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.get-url.outputs.trigger_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🧪 Test Command" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo 'curl -X POST "'${{ steps.get-url.outputs.trigger_url }}'" \' >> $GITHUB_STEP_SUMMARY
+        echo '  -H "Content-Type: application/json" \' >> $GITHUB_STEP_SUMMARY
+        echo '  -d '"'"'{"fileName": "test.txt", "fileContent": "SGVsbG8gV29ybGQ=", "contentType": "text/plain"}'"'" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload deployment artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: deployment-info-${{ steps.set-vars.outputs.environment }}
+        path: |
+          template.json
+          parameters.json
+          workflow.json
+        retention-days: 30

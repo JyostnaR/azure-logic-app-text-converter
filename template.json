@@ -1,0 +1,212 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "[concat('text-to-json-converter-', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Name of the Logic App"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev",
+      "allowedValues": [
+        "dev",
+        "staging",
+        "prod"
+      ],
+      "metadata": {
+        "description": "Environment name"
+      }
+    }
+  },
+  "variables": {
+    "logicAppResourceId": "[resourceId('Microsoft.Logic/workflows', parameters('logicAppName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2017-07-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "Environment": "[parameters('environment')]",
+        "Application": "TextToJsonConverter",
+        "CreatedBy": "Azure Logic Apps"
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {},
+          "triggers": {
+            "manual": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fileName": {
+                      "type": "string",
+                      "description": "Name of the file being processed"
+                    },
+                    "fileContent": {
+                      "type": "string",
+                      "description": "Base64 encoded file content"
+                    },
+                    "contentType": {
+                      "type": "string",
+                      "description": "MIME type of the file content",
+                      "default": "text/plain"
+                    }
+                  },
+                  "required": ["fileName", "fileContent"]
+                }
+              }
+            }
+          },
+          "actions": {
+            "Initialize_variables": {
+              "runAfter": {},
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "decodedContent",
+                    "type": "string"
+                  },
+                  {
+                    "name": "jsonResult",
+                    "type": "string"
+                  },
+                  {
+                    "name": "responseData",
+                    "type": "object"
+                  }
+                ]
+              }
+            },
+            "Decode_Base64_Content": {
+              "runAfter": {
+                "Initialize_variables": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose",
+              "inputs": "@base64ToString(triggerBody()?['fileContent'])"
+            },
+            "Set_Decoded_Content": {
+              "runAfter": {
+                "Decode_Base64_Content": [
+                  "Succeeded"
+                ]
+              },
+              "type": "SetVariable",
+              "inputs": {
+                "name": "decodedContent",
+                "value": "@outputs('Decode_Base64_Content')"
+              }
+            },
+            "Parse_Text_to_JSON": {
+              "runAfter": {
+                "Set_Decoded_Content": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose",
+              "inputs": {
+                "fileName": "@triggerBody()?['fileName']",
+                "contentType": "@triggerBody()?['contentType']",
+                "fileSize": "@length(variables('decodedContent'))",
+                "content": "@variables('decodedContent')",
+                "lines": "@split(variables('decodedContent'), '\n')",
+                "wordCount": "@length(split(variables('decodedContent'), ' '))",
+                "processedAt": "@utcNow()",
+                "metadata": {
+                  "originalFileName": "@triggerBody()?['fileName']",
+                  "processingTimestamp": "@utcNow()",
+                  "logicAppName": "@workflow()?['name']",
+                  "runId": "@workflow()?['run']?['name']"
+                }
+              }
+            },
+            "Set_JSON_Result": {
+              "runAfter": {
+                "Parse_Text_to_JSON": [
+                  "Succeeded"
+                ]
+              },
+              "type": "SetVariable",
+              "inputs": {
+                "name": "jsonResult",
+                "value": "@string(outputs('Parse_Text_to_JSON'))"
+              }
+            },
+            "Create_Response_Object": {
+              "runAfter": {
+                "Set_JSON_Result": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose",
+              "inputs": {
+                "status": "success",
+                "message": "File content successfully converted to JSON",
+                "data": "@outputs('Parse_Text_to_JSON')",
+                "processingInfo": {
+                  "processedAt": "@utcNow()",
+                  "processingTime": "@div(sub(ticks(utcNow()), ticks(workflow()?['run']?['startTime'])), 10000)",
+                  "logicAppRunId": "@workflow()?['run']?['name']"
+                }
+              }
+            },
+            "Return_HTTP_Response": {
+              "runAfter": {
+                "Create_Response_Object": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Response",
+              "kind": "Http",
+              "inputs": {
+                "statusCode": 200,
+                "headers": {
+                  "Content-Type": "application/json",
+                  "X-Processed-By": "Azure Logic App",
+                  "X-Processing-Time": "@div(sub(ticks(utcNow()), ticks(workflow()?['run']?['startTime'])), 10000)"
+                },
+                "body": "@outputs('Create_Response_Object')"
+              }
+            }
+          },
+          "outputs": {}
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "logicAppName": {
+      "type": "string",
+      "value": "[parameters('logicAppName')]"
+    },
+    "logicAppResourceId": {
+      "type": "string",
+      "value": "[variables('logicAppResourceId')]"
+    },
+    "httpEndpoint": {
+      "type": "string",
+      "value": "[concat('https://management.azure.com', reference(variables('logicAppResourceId')).runId)]"
+    }
+  }
+}
