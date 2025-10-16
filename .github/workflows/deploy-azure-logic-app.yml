@@ -75,10 +75,8 @@ jobs:
         subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         resourceGroupName: ${{ steps.set-vars.outputs.resource_group }}
         template: template.json
-        parameters: |
-          logicAppName=${{ steps.set-vars.outputs.logic_app_name }}
-          location=${{ steps.set-vars.outputs.location }}
-          environment=${{ steps.set-vars.outputs.environment }}
+        parameters: >
+          logicAppName=${{ steps.set-vars.outputs.logic_app_name }} location=${{ steps.set-vars.outputs.location }} environment=${{ steps.set-vars.outputs.environment }}
         deploymentName: ${{ steps.set-vars.outputs.deployment_name }}
 
     - name: Get Logic App Trigger URL
